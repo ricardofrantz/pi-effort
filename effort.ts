@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import type { ThinkingLevel } from "@mariozechner/pi-ai";
+import type { Model, ThinkingLevel } from "@mariozechner/pi-ai";
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export const THINKING_LEVELS_WITHOUT_XHIGH = ["off", "minimal", "low", "medium", "high"] as const;
@@ -12,10 +12,7 @@ export type EffortCommand =
   | { kind: "set-session"; level: EffortLevel }
   | { kind: "set-default"; level: EffortLevel | null };
 
-export interface EffortModelLike {
-  id: string;
-  reasoning?: boolean;
-}
+export type EffortModel = Pick<Model<any>, "id" | "reasoning">;
 
 export function isThinkingLevel(value: string): value is EffortLevel {
   return THINKING_LEVELS.includes(value as EffortLevel);
@@ -47,7 +44,7 @@ export function parseEffortCommand(args: string): EffortCommand {
   throw new Error(`Unknown effort command "${first}".`);
 }
 
-export function supportsXhighThinking(model: EffortModelLike | null | undefined): boolean {
+export function supportsXhighThinking(model: EffortModel | null | undefined): boolean {
   if (!model) return false;
   if (model.id.includes("gpt-5.2") || model.id.includes("gpt-5.3") || model.id.includes("gpt-5.4")) {
     return true;
@@ -65,8 +62,8 @@ export function supportsXhighThinking(model: EffortModelLike | null | undefined)
   return false;
 }
 
-export function getAvailableThinkingLevels(model: EffortModelLike | null | undefined): EffortLevel[] {
-  if (!model?.reasoning) return ["off"];
+export function getAvailableThinkingLevels(model: EffortModel | null | undefined): EffortLevel[] {
+  if (!model || !model.reasoning) return ["off"];
   return supportsXhighThinking(model) ? [...THINKING_LEVELS] : [...THINKING_LEVELS_WITHOUT_XHIGH];
 }
 

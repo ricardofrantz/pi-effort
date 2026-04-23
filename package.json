@@ -9,6 +9,10 @@
     "type": "git",
     "url": "git+https://github.com/ricardofrantz/pi-effort.git"
   },
+  "homepage": "https://github.com/ricardofrantz/pi-effort#readme",
+  "bugs": {
+    "url": "https://github.com/ricardofrantz/pi-effort/issues"
+  },
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -32,6 +36,7 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "files": [
+    "CHANGELOG.md",
     "effort.ts",
     "index.ts",
     "README.md",
