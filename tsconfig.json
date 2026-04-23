@@ -5,11 +5,14 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
     "types": [
       "node"
-    ]
+    ],
+    "allowSyntheticDefaultImports": true
   },
   "include": [
-    "index.ts"
+    "*.ts",
+    "tests/**/*.ts"
   ]
 }

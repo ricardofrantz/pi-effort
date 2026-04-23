@@ -23,10 +23,34 @@ Planned command surface:
 /effort default <off|minimal|low|medium|high|xhigh>
 ```
 
-## Status
+## Commands
 
-This repository is currently a scaffold. The extension entrypoint exists, but
-the `/effort` command implementation is not added yet.
+```text
+/effort
+/effort show
+/effort off
+/effort minimal
+/effort low
+/effort medium
+/effort high
+/effort xhigh
+/effort default off
+/effort default minimal
+/effort default low
+/effort default medium
+/effort default high
+/effort default xhigh
+/effort default clear
+```
+
+Behavior:
+
+- `/effort` or `/effort show` shows the current session effort and the persisted
+  default effort.
+- `/effort <level>` changes the current session thinking level.
+- `/effort default <level>` changes the default thinking level for future
+  sessions by editing `~/.pi/agent/settings.json`.
+- `/effort default clear` removes the persisted default.
 
 ## Install
 
@@ -48,10 +72,24 @@ Then load it from a local checkout:
 pi --extension ./index.ts
 ```
 
+Or install the package into Pi:
+
+```bash
+pi install git:github.com/ricardofrantz/pi-effort
+```
+
+## Verification
+
+```bash
+npm run check
+npm test
+```
+
 ## Repo structure
 
 ```text
 index.ts        Pi extension entrypoint
+effort.ts       Parsing and settings helpers
 package.json    Package metadata and Pi manifest
 tsconfig.json   TypeScript configuration
 ```

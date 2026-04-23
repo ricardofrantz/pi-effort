@@ -21,7 +21,12 @@
       "./index.ts"
     ]
   },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
   "files": [
+    "effort.ts",
     "index.ts",
     "README.md",
     "LICENSE"
@@ -29,6 +34,7 @@
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "^0.69.0",
     "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   }
 }
