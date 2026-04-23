@@ -26,6 +26,10 @@
     "thinking",
     "effort"
   ],
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*"
+  },
   "pi": {
     "extensions": [
       "./index.ts"

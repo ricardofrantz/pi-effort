@@ -2,12 +2,14 @@
 
 Small Pi extension for controlling thinking/effort from inside a Pi session.
 
-`pi-effort` adds a simple `/effort` command to Pi so you can:
+## Goal
 
-- inspect the current session thinking level
-- see which effort levels the current model actually supports
-- change the current session effort without restarting Pi
-- set or clear the default effort for future sessions
+Provide a simple `/effort` command for:
+
+- showing the current thinking level
+- showing model-specific available effort levels
+- changing the current session thinking level
+- setting a persistent default thinking level
 
 ## Commands
 
@@ -30,52 +32,27 @@ Small Pi extension for controlling thinking/effort from inside a Pi session.
 /effort default clear
 ```
 
-## What It Does
+Behavior:
 
 - `/effort` or `/effort show` shows the current session effort and the persisted
   default effort, plus the Pi-level effort options available for the current model.
 - `/effort options` shows only the Pi-level effort options available for the
   current model.
-- `/effort <level>` changes the current session thinking level.
+- `/effort <level>` changes the current session thinking level. If the level is
+  not supported by the current model, the command is rejected with an error and
+  the current level is unchanged.
 - `/effort default <level>` changes the default thinking level for future
   sessions by editing `~/.pi/agent/settings.json`.
 - `/effort default clear` removes the persisted default.
+
+Invalid commands show a suggestion when the input is close to a valid option
+(e.g., `/effort hihg` suggests "Did you mean \"high\"?").
 
 New sessions automatically pick up `defaultThinkingLevel` from Pi's own
 session/runtime initialization path. `pi-effort` does not add a separate
 `session_start` hook for this because Pi core already applies the default.
 
-## Examples
-
-```text
-/effort show
-```
-
-Shows:
-
-```text
-current=<level> | default=<level-or-unset> | available=<levels>
-```
-
-```text
-/effort high
-```
-
-Changes the current session effort to `high`.
-
-```text
-/effort default xhigh
-```
-
-Sets the default effort for future Pi sessions to `xhigh`.
-
-```text
-/effort default clear
-```
-
-Removes the persisted default.
-
-## Model-Specific Options
+## Model-specific options
 
 `pi-effort` follows Pi's own model-level thinking granularity:
 
@@ -92,54 +69,61 @@ Important: this is Pi-level effort, not raw provider-native labels. For example,
 Anthropic may internally map Pi's `xhigh` to a provider-specific maximum effort,
 but the extension surface remains Pi's standard thinking levels.
 
+### Custom xhigh model patterns
+
+You can override the built-in xhigh model list by adding a `xhighModelPatterns`
+array to `~/.pi/agent/settings.json`:
+
+```json
+{
+  "xhighModelPatterns": ["my-custom-model", "another-pattern"]
+}
+```
+
+If present, these patterns replace the built-in list entirely. Each pattern is
+matched as a substring against the model ID.
+
 ## Install
 
-### From Git
+### npm (preferred, after publish)
+
+```bash
+pi install npm:pi-effort
+```
+
+### Git (current install path)
 
 ```bash
 pi install git:github.com/ricardofrantz/pi-effort
-```
-
-Then reload Pi resources:
-
-```bash
-/reload
 ```
 
 ### Local development
 
 ```bash
 npm install
-```
-
-Then load it from a local checkout:
-
-```bash
 pi --extension ./index.ts
 ```
+
+## Packaging Notes
+
+- `pi-effort` is a Pi package via `package.json.pi.extensions`
+- Pi core runtime imports are declared as `peerDependencies`, per Pi package docs
+- once published to npm, the intended install path is `pi install npm:pi-effort`
 
 ## Verification
 
 ```bash
 npm run check
 npm test
+npm pack --dry-run
+npm publish --dry-run
 ```
 
-## Why This Exists
-
-Pi already has thinking-level controls, but they are not exposed as a small,
-focused slash command for daily use. `pi-effort` makes that workflow explicit:
-
-- one command to inspect session/default effort
-- one command to change the current session
-- one command to set the next-session default
-
-## Repo Structure
+## Repo structure
 
 ```text
 index.ts        Pi extension entrypoint
-effort.ts       Parsing and settings helpers
-tests/          Unit and runtime tests
+effort.ts       Parsing, settings helpers, and model capability logic
 package.json    Package metadata and Pi manifest
 tsconfig.json   TypeScript configuration
 ```
