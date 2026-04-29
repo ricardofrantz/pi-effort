@@ -20,6 +20,8 @@ import {
 } from "../node_modules/@mariozechner/pi-coding-agent/dist/core/extensions/loader.js";
 import effortExtension from "../index.ts";
 
+type PiThinkingLevel = ThinkingLevel | "off";
+
 const reasoningModel: Model<any> = {
   id: "minimax/minimax-m2.7",
   name: "MiniMax M2.7",
@@ -43,6 +45,19 @@ const xhighModel: Model<any> = {
   input: ["text"],
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   contextWindow: 196608,
+  maxTokens: 4096,
+};
+
+const plainModel: Model<any> = {
+  id: "plain-model",
+  name: "Plain Model",
+  api: "openai-completions",
+  provider: "openrouter",
+  baseUrl: "https://openrouter.ai/api/v1",
+  reasoning: false,
+  input: ["text"],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 128000,
   maxTokens: 4096,
 };
 
@@ -87,11 +102,15 @@ function makeSessionConfig() {
 
 async function createTestSession(
   model: Model<any>,
-  thinkingLevel: ThinkingLevel,
-  defaultThinkingLevel?: ThinkingLevel
+  thinkingLevel: PiThinkingLevel,
+  defaultThinkingLevel?: PiThinkingLevel,
+  flags: Record<string, boolean | string> = {}
 ) {
   const config = makeSessionConfig();
   const extension = await config.extensionPromise;
+  for (const [name, value] of Object.entries(flags)) {
+    config.runtime.flagValues.set(name, value);
+  }
   const extensionsResult: LoadExtensionsResult = { extensions: [extension], errors: [], runtime: config.runtime };
   const resourceLoader = createResourceLoader(extensionsResult);
 
@@ -101,6 +120,7 @@ async function createTestSession(
   }
 
   const authStorage = AuthStorage.create(join(config.agentDir, "auth.json"));
+  authStorage.set("openrouter", { type: "api_key", key: "test" });
   const modelRegistry = ModelRegistry.create(authStorage, join(config.agentDir, "models.json"));
   const sessionManager = SessionManager.inMemory();
 
@@ -115,8 +135,9 @@ async function createTestSession(
     sessionManager,
     resourceLoader,
   });
+  await session.bindExtensions({});
 
-  return { session, agentDir: config.agentDir, previousAgentDir: config.previousAgentDir };
+  return { session, extension, agentDir: config.agentDir, previousAgentDir: config.previousAgentDir };
 }
 
 function cleanupSession(previousAgentDir: string | undefined) {
@@ -229,6 +250,65 @@ test("runtime /effort default max writes resolved level to settings", async () =
     await session.prompt("/effort default max");
     const persisted = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
     assert.equal(persisted.defaultThinkingLevel, "xhigh");
+  } finally {
+    cleanupSession(previousAgentDir);
+  }
+});
+
+// ─── Extension lifecycle surface tests ──────────────────────────────
+
+test("runtime --effort flag resolves aliases on session start", async () => {
+  const { session, previousAgentDir } = await createTestSession(xhighModel, "medium", "medium", { effort: "max" });
+
+  try {
+    assert.equal(session.thinkingLevel, "xhigh" as ThinkingLevel);
+  } finally {
+    cleanupSession(previousAgentDir);
+  }
+});
+
+test("runtime model switch clamps xhigh to the new model maximum", async () => {
+  const { session, previousAgentDir } = await createTestSession(xhighModel, "xhigh", "xhigh");
+
+  try {
+    await session.setModel(reasoningModel);
+    assert.equal(session.thinkingLevel, "high" as ThinkingLevel);
+  } finally {
+    cleanupSession(previousAgentDir);
+  }
+});
+
+test("runtime model switch clamps reasoning effort to off for non-reasoning models", async () => {
+  const { session, previousAgentDir } = await createTestSession(reasoningModel, "high", "high");
+
+  try {
+    await session.setModel(plainModel);
+    assert.equal(session.thinkingLevel, "off" as PiThinkingLevel);
+  } finally {
+    cleanupSession(previousAgentDir);
+  }
+});
+
+test("argument completions are model-aware but keep explicit default levels", async () => {
+  const { extension, previousAgentDir } = await createTestSession(plainModel, "off", "off");
+
+  try {
+    const command = extension.commands.get("effort");
+    assert.ok(command?.getArgumentCompletions);
+
+    const topLevel = await command.getArgumentCompletions("");
+    assert.deepEqual(topLevel?.map((item) => item.value), ["off", "show", "options", "default", "help"]);
+
+    const defaultOptions = await command.getArgumentCompletions("default ");
+    assert.deepEqual(defaultOptions?.map((item) => item.value), [
+      "default off",
+      "default minimal",
+      "default low",
+      "default medium",
+      "default high",
+      "default xhigh",
+      "default clear",
+    ]);
   } finally {
     cleanupSession(previousAgentDir);
   }

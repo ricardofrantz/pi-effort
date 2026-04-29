@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { supportsXhigh } from "@mariozechner/pi-ai";
 import type { Model, ThinkingLevel } from "@mariozechner/pi-ai";
@@ -19,6 +19,7 @@ export const USER_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as cons
 export const SEMANTIC_ALIASES = ["min", "max"] as const;
 
 export type EffortLevel = (typeof ALL_LEVELS)[number];
+export type EffortAlias = (typeof SEMANTIC_ALIASES)[number];
 
 /**
  * Resolve the Pi ThinkingLevel from our EffortLevel.
@@ -30,6 +31,10 @@ export function toThinkingLevel(level: EffortLevel): ThinkingLevel | "off" {
 
 export function isEffortLevel(value: string): value is EffortLevel {
   return ALL_LEVELS.includes(value as EffortLevel);
+}
+
+export function isEffortAlias(value: string): value is EffortAlias {
+  return SEMANTIC_ALIASES.includes(value as EffortAlias);
 }
 
 export type EffortCommand =
@@ -86,7 +91,7 @@ function suggestClosest(input: string, candidates: readonly string[]): string | 
 }
 
 /** All tokens valid as the first argument to /effort. */
-const FIRST_TOKEN_CANDIDATES = [...USER_LEVELS, ...SEMANTIC_ALIASES, "show", "options", "default", "help"];
+const FIRST_TOKEN_CANDIDATES = [...ALL_LEVELS, ...SEMANTIC_ALIASES, "show", "options", "default", "help"];
 
 // ─── Parser ─────────────────────────────────────────────────────────
 
@@ -112,7 +117,7 @@ export function parseEffortCommand(args: string): EffortCommand {
     if (second === "max") return { kind: "set-default-max" };
     if (second === "min") return { kind: "set-default-min" };
     if (isEffortLevel(second)) return { kind: "set-default", level: second };
-    const suggestion = suggestClosest(second, [...USER_LEVELS, ...SEMANTIC_ALIASES]);
+    const suggestion = suggestClosest(second, [...ALL_LEVELS, ...SEMANTIC_ALIASES, "clear", "unset"]);
     const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
     throw new Error(`Unknown default thinking level "${second}".${hint}`);
   }
@@ -154,6 +159,16 @@ export function resolveMinLevel(model: EffortModel | null | undefined): EffortLe
 export function resolveMaxLevel(model: EffortModel | null | undefined): EffortLevel | undefined {
   if (!model?.reasoning) return undefined;
   return supportsXhigh(model as Model<any>) ? "xhigh" : "high";
+}
+
+/** Resolve a user-facing level or semantic alias against the active model. */
+export function resolveEffortLevel(
+  value: EffortLevel | EffortAlias,
+  model: EffortModel | null | undefined
+): EffortLevel | undefined {
+  if (value === "min") return resolveMinLevel(model);
+  if (value === "max") return resolveMaxLevel(model);
+  return value;
 }
 
 /** Cycle to the next effort level for the given model. Wraps around. */
@@ -205,9 +220,20 @@ export function writeDefaultThinkingLevel(settingsPath: string, level: EffortLev
 
   const content = `${JSON.stringify(settings, null, 2)}\n`;
   const dir = dirname(settingsPath);
+  mkdirSync(dir, { recursive: true });
   const tmpPath = join(dir, `.settings.json.tmp.${process.pid}.${randomUUID()}`);
-  writeFileSync(tmpPath, content, "utf-8");
-  renameSync(tmpPath, settingsPath);
+
+  try {
+    writeFileSync(tmpPath, content, "utf-8");
+    renameSync(tmpPath, settingsPath);
+  } catch (error) {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // Best effort: the original write failure is more useful to callers.
+    }
+    throw error;
+  }
 }
 
 // ─── Help text ──────────────────────────────────────────────────────
@@ -217,8 +243,9 @@ export const USAGE = [
   "  /effort            show current effort",
   "  /effort min        set minimum effort for this model",
   "  /effort max        set maximum effort for this model",
-  "  /effort <level>    set explicit level (minimal|low|medium|high|xhigh)",
+  "  /effort <level>    set explicit level (off|minimal|low|medium|high|xhigh)",
   "  /effort options    show available levels for this model",
+  "  /effort help       show command help",
   "  /effort default min|max|<level>",
   "  /effort default clear",
 ].join("\n");

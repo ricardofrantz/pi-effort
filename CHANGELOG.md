@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.0.4] - 2026-04-29
+
+### Changed
+- Replaced the direct `@mariozechner/pi-tui` runtime import for the effort shortcut with Pi's documented shortcut string form.
+- Improved non-reasoning model messaging and model-switch UI sync.
+- Effort changes now update Pi's working label when idle and keep active-run loader text tied to the run-start effort.
+- Tab completion now keeps `off` and explicit default levels available even when the current model cannot think.
+
+### Fixed
+- Regenerated stale lockfile metadata for the current package version and dependency contract.
+- Default settings writes now create the settings directory and clean up temporary files after failed writes.
+
+### Added
+- Integration coverage for the `--effort` startup flag, model-switch capability clamping, and registered argument completions.
+- CI/package verification via `npm pack --dry-run`.
+
 ## [0.0.3] - 2026-04-23
 
 ### Changed
@@ -26,7 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `/effort default min` and `/effort default max` — set persistent defaults using the resolved level
 - `Ctrl+Shift+E` keyboard shortcut to cycle through available effort levels
 - `--effort` CLI flag (e.g., `pi --effort max`) to set initial effort on session start
-- `session_start` hook — sets footer status and applies `--effort` flag on startup
+- `session_start` hook — syncs visible effort UI and applies `--effort` flag on startup
 - `model_select` hook — clamps effort when switching to a model with a lower max, with warning notification
 - `cycleLevel()` — cycles through user-facing levels (powers the keyboard shortcut)
 - `getUserFacingLevels()` — returns available levels excluding `off` for display/completion

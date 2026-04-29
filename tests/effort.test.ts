@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ThinkingLevel } from "@mariozechner/pi-ai";
@@ -11,6 +11,7 @@ import {
   getDefaultThinkingLevel,
   getUserFacingLevels,
   parseEffortCommand,
+  resolveEffortLevel,
   resolveMaxLevel,
   resolveMinLevel,
   cycleLevel,
@@ -69,9 +70,10 @@ test("parseEffortCommand suggests close matches for typos", () => {
   assert.throws(() => parseEffortCommand("shwo"), /Did you mean "show"\?/);
 });
 
-test("parseEffortCommand suggests min/max for close typos", () => {
+test("parseEffortCommand suggests min/max and off for close typos", () => {
   assert.throws(() => parseEffortCommand("mn"), /Did you mean "min"\?/);
   assert.throws(() => parseEffortCommand("maxe"), /Did you mean "max"\?/);
+  assert.throws(() => parseEffortCommand("default of"), /Did you mean "off"\?/);
 });
 
 test("parseEffortCommand does not suggest distant typos", () => {
@@ -109,6 +111,17 @@ test("resolveMaxLevel returns xhigh for xhigh-capable models", () => {
 test("resolveMaxLevel returns undefined for non-reasoning models", () => {
   assert.equal(resolveMaxLevel({ id: "plain-model", reasoning: false }), undefined);
   assert.equal(resolveMaxLevel(null), undefined);
+});
+
+test("resolveEffortLevel resolves semantic aliases per model", () => {
+  const standard = { id: "minimax/minimax-m2.7", reasoning: true } as const;
+  const xhigh = { id: "gpt-5.4", reasoning: true } as const;
+
+  assert.equal(resolveEffortLevel("min", standard), "minimal");
+  assert.equal(resolveEffortLevel("max", standard), "high");
+  assert.equal(resolveEffortLevel("max", xhigh), "xhigh");
+  assert.equal(resolveEffortLevel("medium", standard), "medium");
+  assert.equal(resolveEffortLevel("min", { id: "plain-model", reasoning: false }), undefined);
 });
 
 // ─── xhigh capability (via public functions) ─────────────────────────
@@ -223,6 +236,16 @@ test("writeDefaultThinkingLevel uses atomic write", () => {
   assert.equal(tempFiles.length, 0);
 });
 
+test("writeDefaultThinkingLevel creates the settings directory", () => {
+  const dir = join(mkdtempSync(join(tmpdir(), "pi-effort-")), "missing", "agent");
+  const settingsPath = join(dir, "settings.json");
+
+  writeDefaultThinkingLevel(settingsPath, "low");
+
+  assert.equal(existsSync(settingsPath), true);
+  assert.equal(getDefaultThinkingLevel(settingsPath), "low");
+});
+
 test("getDefaultThinkingLevel returns undefined on corrupt JSON", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-effort-"));
   const settingsPath = join(dir, "settings.json");
@@ -242,9 +265,10 @@ test("getDefaultThinkingLevel returns undefined on unreadable settings", () => {
 
 // ─── USAGE ───────────────────────────────────────────────────────────
 
-test("USAGE includes min and max", () => {
+test("USAGE includes min, max, and off", () => {
   assert.match(USAGE, /min/);
   assert.match(USAGE, /max/);
+  assert.match(USAGE, /off/);
   assert.match(USAGE, /\/effort/);
 });
 
