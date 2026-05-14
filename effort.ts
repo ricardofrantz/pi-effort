@@ -5,21 +5,24 @@ import { getSupportedThinkingLevels } from "@mariozechner/pi-ai";
 import type { Model, ThinkingLevel } from "@mariozechner/pi-ai";
 
 /**
- * All levels the extension knows about, including "off" (Pi's internal default).
- * "off" is accepted by the parser for backward compat but not shown in the
- * primary command surface — use `min`/`max` or explicit reasoning levels instead.
+ * All levels the extension knows about, including "off" (Pi's internal state).
+ * The slash-command surface intentionally exposes only model reasoning options.
  */
 export const ALL_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export const ALL_LEVELS_WITHOUT_XHIGH = ["off", "minimal", "low", "medium", "high"] as const;
 
-/** Levels shown to users in USAGE, tab completion, and /effort options. */
+/** Levels shown to users in usage and tab completion. */
 export const USER_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const satisfies readonly ThinkingLevel[];
 
 /** Semantic aliases that resolve per-model. */
 export const SEMANTIC_ALIASES = ["min", "max"] as const;
 
+/** Fast mode subcommands. */
+export const FAST_MODE_ACTIONS = ["on", "off"] as const;
+
 export type EffortLevel = (typeof ALL_LEVELS)[number];
 export type EffortAlias = (typeof SEMANTIC_ALIASES)[number];
+export type FastModeAction = (typeof FAST_MODE_ACTIONS)[number];
 
 /**
  * Resolve the Pi ThinkingLevel from our EffortLevel.
@@ -38,15 +41,11 @@ export function isEffortAlias(value: string): value is EffortAlias {
 }
 
 export type EffortCommand =
-  | { kind: "show" }
-  | { kind: "options" }
-  | { kind: "help" }
   | { kind: "set-session"; level: EffortLevel }
   | { kind: "set-min" }
-  | { kind: "set-max" }
-  | { kind: "set-default-min" }
-  | { kind: "set-default-max" }
-  | { kind: "set-default"; level: EffortLevel | null };
+  | { kind: "set-max" };
+
+export type FastCommand = { kind: "fast-set"; enabled: boolean } | { kind: "fast-toggle" };
 
 export type EffortModel = Pick<Model<any>, "id" | "reasoning" | "thinkingLevelMap">;
 
@@ -91,43 +90,43 @@ function suggestClosest(input: string, candidates: readonly string[]): string | 
 }
 
 /** All tokens valid as the first argument to /effort. */
-const FIRST_TOKEN_CANDIDATES = [...ALL_LEVELS, ...SEMANTIC_ALIASES, "show", "options", "default", "help"];
+const EFFORT_TOKEN_CANDIDATES = [...USER_LEVELS, ...SEMANTIC_ALIASES];
 
 // ─── Parser ─────────────────────────────────────────────────────────
 
 export function parseEffortCommand(args: string): EffortCommand {
   const tokens = args.trim().split(/\s+/).filter(Boolean);
 
-  if (tokens.length === 0) return { kind: "show" };
-
-  const [first, second, ...rest] = tokens;
-  if (rest.length > 0) {
-    throw new Error(`Too many arguments.\n${USAGE}`);
+  if (tokens.length !== 1) {
+    throw new Error(USAGE);
   }
 
-  if (first === "help") return { kind: "help" };
-  if (first === "options" || first === "available") return { kind: "options" };
-  if (first === "show" || first === "status" || first === "current") return { kind: "show" };
+  const [first] = tokens;
   if (first === "max") return { kind: "set-max" };
   if (first === "min") return { kind: "set-min" };
+  if (USER_LEVELS.includes(first as ThinkingLevel)) return { kind: "set-session", level: first as EffortLevel };
 
-  if (first === "default") {
-    if (!second || second === "show" || second === "status") return { kind: "show" };
-    if (second === "clear" || second === "unset") return { kind: "set-default", level: null };
-    if (second === "max") return { kind: "set-default-max" };
-    if (second === "min") return { kind: "set-default-min" };
-    if (isEffortLevel(second)) return { kind: "set-default", level: second };
-    const suggestion = suggestClosest(second, [...ALL_LEVELS, ...SEMANTIC_ALIASES, "clear", "unset"]);
-    const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
-    throw new Error(`Unknown default thinking level "${second}".${hint}`);
+  const suggestion = suggestClosest(first, EFFORT_TOKEN_CANDIDATES);
+  const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
+  throw new Error(`Unknown effort level "${first}".${hint}\n${USAGE}`);
+}
+
+export function parseFastCommand(args: string): FastCommand {
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+
+  if (tokens.length === 0) return { kind: "fast-toggle" };
+
+  if (tokens.length !== 1) {
+    throw new Error(FAST_USAGE);
   }
 
-  // Accept "off" for backward compat even though it's not in the user-facing list
-  if (isEffortLevel(first)) return { kind: "set-session", level: first };
+  const [first] = tokens;
+  if (first === "on") return { kind: "fast-set", enabled: true };
+  if (first === "off") return { kind: "fast-set", enabled: false };
 
-  const suggestion = suggestClosest(first, FIRST_TOKEN_CANDIDATES);
+  const suggestion = suggestClosest(first, FAST_MODE_ACTIONS);
   const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
-  throw new Error(`Unknown effort command "${first}".${hint}`);
+  throw new Error(`Unknown fast mode "${first}".${hint}\n${FAST_USAGE}`);
 }
 
 // ─── Model capability resolution ────────────────────────────────────
@@ -199,25 +198,7 @@ export function readSettingsObject(settingsPath: string): Record<string, unknown
   }
 }
 
-export function getDefaultThinkingLevel(settingsPath: string): EffortLevel | undefined {
-  try {
-    const settings = readSettingsObject(settingsPath);
-    const value = settings.defaultThinkingLevel;
-    return typeof value === "string" && isEffortLevel(value) ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function writeDefaultThinkingLevel(settingsPath: string, level: EffortLevel | null): void {
-  const settings = readSettingsObject(settingsPath);
-
-  if (level === null) {
-    delete settings.defaultThinkingLevel;
-  } else {
-    settings.defaultThinkingLevel = level;
-  }
-
+function writeSettingsObject(settingsPath: string, settings: Record<string, unknown>): void {
   const content = `${JSON.stringify(settings, null, 2)}\n`;
   const dir = dirname(settingsPath);
   mkdirSync(dir, { recursive: true });
@@ -236,16 +217,30 @@ export function writeDefaultThinkingLevel(settingsPath: string, level: EffortLev
   }
 }
 
+function readPiEffortSettings(settings: Record<string, unknown>): Record<string, unknown> {
+  const value = settings["pi-effort"];
+  return value && typeof value === "object" && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : {};
+}
+
+export function getFastMode(settingsPath: string): boolean {
+  try {
+    const settings = readSettingsObject(settingsPath);
+    const piEffort = readPiEffortSettings(settings);
+    return piEffort.fastMode === true;
+  } catch {
+    return false;
+  }
+}
+
+export function writeFastMode(settingsPath: string, enabled: boolean): void {
+  const settings = readSettingsObject(settingsPath);
+  const piEffort = readPiEffortSettings(settings);
+  piEffort.fastMode = enabled;
+  settings["pi-effort"] = piEffort;
+  writeSettingsObject(settingsPath, settings);
+}
+
 // ─── Help text ──────────────────────────────────────────────────────
 
-export const USAGE = [
-  "Usage:",
-  "  /effort            show current effort",
-  "  /effort min        set minimum effort for this model",
-  "  /effort max        set maximum effort for this model",
-  "  /effort <level>    set explicit level (off|minimal|low|medium|high|xhigh)",
-  "  /effort options    show available levels for this model",
-  "  /effort help       show command help",
-  "  /effort default min|max|<level>",
-  "  /effort default clear",
-].join("\n");
+export const USAGE = "Usage: /effort {min|minimal|low|medium|high|xhigh|max}";
+export const FAST_USAGE = "Usage: /fast [on|off]";

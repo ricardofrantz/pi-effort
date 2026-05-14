@@ -1,21 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ThinkingLevel } from "@mariozechner/pi-ai";
 import {
+  FAST_USAGE,
   USAGE,
   USER_LEVELS,
   getAvailableThinkingLevels,
-  getDefaultThinkingLevel,
+  getFastMode,
   getUserFacingLevels,
   parseEffortCommand,
+  parseFastCommand,
   resolveEffortLevel,
   resolveMaxLevel,
   resolveMinLevel,
   cycleLevel,
-  writeDefaultThinkingLevel,
+  writeFastMode,
 } from "../effort.ts";
 
 // If @mariozechner/pi-ai adds a new ThinkingLevel (e.g. "xmax"), this
@@ -29,14 +31,7 @@ const standardReasoningModel = { id: "minimax/minimax-m2.7", reasoning: true } a
 const xhighReasoningModel = { id: "gpt-5.4", reasoning: true, thinkingLevelMap: { xhigh: "xhigh" } } as const;
 const opusXhighReasoningModel = { id: "claude-opus-4.6", reasoning: true, thinkingLevelMap: { xhigh: "xhigh" } } as const;
 
-// ─── parseEffortCommand ──────────────────────────────────────────────
-
-test("parseEffortCommand handles show and help", () => {
-  assert.deepEqual(parseEffortCommand(""), { kind: "show" });
-  assert.deepEqual(parseEffortCommand("show"), { kind: "show" });
-  assert.deepEqual(parseEffortCommand("options"), { kind: "options" });
-  assert.deepEqual(parseEffortCommand("help"), { kind: "help" });
-});
+// ─── parseEffortCommand / parseFastCommand ──────────────────────────
 
 test("parseEffortCommand handles explicit levels", () => {
   assert.deepEqual(parseEffortCommand("high"), { kind: "set-session", level: "high" });
@@ -44,44 +39,28 @@ test("parseEffortCommand handles explicit levels", () => {
   assert.deepEqual(parseEffortCommand("minimal"), { kind: "set-session", level: "minimal" });
 });
 
-test("parseEffortCommand accepts off for backward compat", () => {
-  assert.deepEqual(parseEffortCommand("off"), { kind: "set-session", level: "off" });
-});
-
 test("parseEffortCommand handles min and max aliases", () => {
   assert.deepEqual(parseEffortCommand("min"), { kind: "set-min" });
   assert.deepEqual(parseEffortCommand("max"), { kind: "set-max" });
 });
 
-test("parseEffortCommand handles default persistence commands", () => {
-  assert.deepEqual(parseEffortCommand("default high"), { kind: "set-default", level: "high" });
-  assert.deepEqual(parseEffortCommand("default clear"), { kind: "set-default", level: null });
+test("parseEffortCommand rejects anything outside the minimal surface", () => {
+  assert.throws(() => parseEffortCommand(""), /Usage: \/effort/);
+  assert.throws(() => parseEffortCommand("off"), /Unknown effort level/);
+  assert.throws(() => parseEffortCommand("show"), /Unknown effort level/);
+  assert.throws(() => parseEffortCommand("options"), /Unknown effort level/);
+  assert.throws(() => parseEffortCommand("default high"), /Usage: \/effort/);
+  assert.throws(() => parseEffortCommand("fast on"), /Usage: \/effort/);
 });
 
-test("parseEffortCommand handles default min and default max", () => {
-  assert.deepEqual(parseEffortCommand("default min"), { kind: "set-default-min" });
-  assert.deepEqual(parseEffortCommand("default max"), { kind: "set-default-max" });
-});
-
-test("parseEffortCommand rejects invalid input", () => {
-  assert.throws(() => parseEffortCommand("banana"), /Unknown effort command/);
-  assert.throws(() => parseEffortCommand("default banana"), /Unknown default thinking level/);
-});
-
-test("parseEffortCommand suggests close matches for typos", () => {
+test("parseEffortCommand suggests close matches for effort typos", () => {
   assert.throws(() => parseEffortCommand("hihg"), /Did you mean "high"\?/);
-  assert.throws(() => parseEffortCommand("default hihg"), /Did you mean "high"\?/);
-  assert.throws(() => parseEffortCommand("shwo"), /Did you mean "show"\?/);
-});
-
-test("parseEffortCommand suggests min/max and off for close typos", () => {
   assert.throws(() => parseEffortCommand("mn"), /Did you mean "min"\?/);
   assert.throws(() => parseEffortCommand("maxe"), /Did you mean "max"\?/);
-  assert.throws(() => parseEffortCommand("default of"), /Did you mean "off"\?/);
 });
 
 test("parseEffortCommand does not suggest distant typos", () => {
-  assert.throws(() => parseEffortCommand("xyz"), /Unknown effort command/);
+  assert.throws(() => parseEffortCommand("xyz"), /Unknown effort level/);
   let message = "";
   try {
     parseEffortCommand("xyz");
@@ -89,6 +68,14 @@ test("parseEffortCommand does not suggest distant typos", () => {
     message = error instanceof Error ? error.message : String(error);
   }
   assert.doesNotMatch(message, /Did you mean/);
+});
+
+test("parseFastCommand toggles with no args and handles explicit overrides", () => {
+  assert.deepEqual(parseFastCommand(""), { kind: "fast-toggle" });
+  assert.deepEqual(parseFastCommand("on"), { kind: "fast-set", enabled: true });
+  assert.deepEqual(parseFastCommand("off"), { kind: "fast-set", enabled: false });
+  assert.throws(() => parseFastCommand("toggle"), /Unknown fast mode/);
+  assert.throws(() => parseFastCommand("status"), /Unknown fast mode/);
 });
 
 // ─── resolveMinLevel / resolveMaxLevel ───────────────────────────────
@@ -191,89 +178,40 @@ test("cycleLevel returns undefined for non-reasoning models", () => {
 
 // ─── Settings persistence ────────────────────────────────────────────
 
-test("writeDefaultThinkingLevel preserves unrelated settings", () => {
+test("writeFastMode preserves unrelated settings and writes pi-effort namespace", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-effort-"));
   const settingsPath = join(dir, "settings.json");
-  writeFileSync(settingsPath, JSON.stringify({ defaultProvider: "openrouter" }, null, 2));
+  writeFileSync(settingsPath, JSON.stringify({ defaultProvider: "openai-codex" }, null, 2));
 
-  writeDefaultThinkingLevel(settingsPath, "high");
-
-  const parsed = JSON.parse(readFileSync(settingsPath, "utf-8"));
-  assert.equal(parsed.defaultProvider, "openrouter");
-  assert.equal(parsed.defaultThinkingLevel, "high");
-  assert.equal(getDefaultThinkingLevel(settingsPath), "high");
-});
-
-test("writeDefaultThinkingLevel can clear the persisted default", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-effort-"));
-  const settingsPath = join(dir, "settings.json");
-  writeFileSync(settingsPath, JSON.stringify({ defaultThinkingLevel: "xhigh" }, null, 2));
-
-  writeDefaultThinkingLevel(settingsPath, null);
+  writeFastMode(settingsPath, true);
 
   const parsed = JSON.parse(readFileSync(settingsPath, "utf-8"));
-  assert.equal("defaultThinkingLevel" in parsed, false);
-  assert.equal(getDefaultThinkingLevel(settingsPath), undefined);
+  assert.equal(parsed.defaultProvider, "openai-codex");
+  assert.equal(parsed["pi-effort"].fastMode, true);
+  assert.equal(getFastMode(settingsPath), true);
+
+  writeFastMode(settingsPath, false);
+  assert.equal(getFastMode(settingsPath), false);
 });
 
-test("writeDefaultThinkingLevel clears default when none existed", () => {
+test("getFastMode returns false when unset or corrupt", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-effort-"));
   const settingsPath = join(dir, "settings.json");
   writeFileSync(settingsPath, JSON.stringify({ otherKey: "value" }, null, 2));
+  assert.equal(getFastMode(settingsPath), false);
 
-  writeDefaultThinkingLevel(settingsPath, null);
-
-  const parsed = JSON.parse(readFileSync(settingsPath, "utf-8"));
-  assert.equal("defaultThinkingLevel" in parsed, false);
-  assert.equal(parsed.otherKey, "value");
-});
-
-test("writeDefaultThinkingLevel uses atomic write", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-effort-"));
-  const settingsPath = join(dir, "settings.json");
-
-  writeDefaultThinkingLevel(settingsPath, "medium");
-
-  const files = readdirSync(dir);
-  assert.equal(files.includes("settings.json"), true);
-  const tempFiles = files.filter((f) => f.startsWith(".settings.json.tmp"));
-  assert.equal(tempFiles.length, 0);
-});
-
-test("writeDefaultThinkingLevel creates the settings directory", () => {
-  const dir = join(mkdtempSync(join(tmpdir(), "pi-effort-")), "missing", "agent");
-  const settingsPath = join(dir, "settings.json");
-
-  writeDefaultThinkingLevel(settingsPath, "low");
-
-  assert.equal(existsSync(settingsPath), true);
-  assert.equal(getDefaultThinkingLevel(settingsPath), "low");
-});
-
-test("getDefaultThinkingLevel returns undefined on corrupt JSON", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-effort-"));
-  const settingsPath = join(dir, "settings.json");
   writeFileSync(settingsPath, "{not json}");
-
-  assert.equal(getDefaultThinkingLevel(settingsPath), undefined);
-});
-
-test("getDefaultThinkingLevel returns undefined on unreadable settings", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-effort-"));
-  const settingsPath = join(dir, "settings.json");
-  writeFileSync(settingsPath, "{}");
-  const badPath = dir; // readFileSync on a directory throws EISDIR
-
-  assert.equal(getDefaultThinkingLevel(badPath), undefined);
+  assert.equal(getFastMode(settingsPath), false);
 });
 
 // ─── USAGE ───────────────────────────────────────────────────────────
 
-test("USAGE includes min, max, and off", () => {
+test("USAGE exposes only effort and fast primitives", () => {
   assert.match(USAGE, /min/);
   assert.match(USAGE, /max/);
-  assert.match(USAGE, /off/);
   assert.match(USAGE, /\/effort/);
+  assert.doesNotMatch(USAGE, /default|options|show|fast/);
+  assert.equal(FAST_USAGE, "Usage: /fast [on|off]");
 });
 
 // ─── Completion filtering (via getUserFacingLevels) ──────────────────

@@ -162,13 +162,67 @@ test("runtime command changes session thinking level", async () => {
   }
 });
 
-test("runtime default command writes agent settings file", async () => {
-  const { session, agentDir, previousAgentDir } = await createTestSession(reasoningModel, "medium", "medium");
+test("runtime /fast command toggles fast mode setting", async () => {
+  const { session, agentDir, previousAgentDir } = await createTestSession(xhighModel, "medium", "medium");
 
   try {
-    await session.prompt("/effort default high");
-    const persisted = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
-    assert.equal(persisted.defaultThinkingLevel, "high");
+    await session.prompt("/fast on");
+    let persisted = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
+    assert.equal(persisted["pi-effort"].fastMode, true);
+
+    await session.prompt("/fast off");
+    persisted = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
+    assert.equal(persisted["pi-effort"].fastMode, false);
+  } finally {
+    cleanupSession(previousAgentDir);
+  }
+});
+
+test("runtime bare /fast toggles fast mode setting", async () => {
+  const { session, agentDir, previousAgentDir } = await createTestSession(xhighModel, "medium", "medium");
+
+  try {
+    await session.prompt("/fast");
+    let persisted = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
+    assert.equal(persisted["pi-effort"].fastMode, true);
+
+    await session.prompt("/fast");
+    persisted = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
+    assert.equal(persisted["pi-effort"].fastMode, false);
+  } finally {
+    cleanupSession(previousAgentDir);
+  }
+});
+
+test("runtime /fast injects OpenAI priority service tier for GPT-5 requests", async () => {
+  const { session, extension, previousAgentDir } = await createTestSession(xhighModel, "medium", "medium");
+
+  try {
+    await session.prompt("/fast on");
+    const handlers = extension.handlers.get("before_provider_request");
+    assert.ok(handlers?.[0]);
+
+    const payload = { model: "gpt-5.5", input: [], stream: true };
+    const result = await handlers[0]({ type: "before_provider_request", payload }, {});
+
+    assert.deepEqual(result, { ...payload, service_tier: "priority" });
+  } finally {
+    cleanupSession(previousAgentDir);
+  }
+});
+
+test("runtime /fast preserves explicit service tier overrides", async () => {
+  const { session, extension, previousAgentDir } = await createTestSession(xhighModel, "medium", "medium");
+
+  try {
+    await session.prompt("/fast on");
+    const handlers = extension.handlers.get("before_provider_request");
+    assert.ok(handlers?.[0]);
+
+    const payload = { model: "gpt-5.5", service_tier: "default" };
+    const result = await handlers[0]({ type: "before_provider_request", payload }, {});
+
+    assert.equal(result, undefined);
   } finally {
     cleanupSession(previousAgentDir);
   }
@@ -244,18 +298,6 @@ test("runtime /effort min resolves to minimal on reasoning model", async () => {
   }
 });
 
-test("runtime /effort default max writes resolved level to settings", async () => {
-  const { session, agentDir, previousAgentDir } = await createTestSession(xhighModel, "medium", "medium");
-
-  try {
-    await session.prompt("/effort default max");
-    const persisted = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
-    assert.equal(persisted.defaultThinkingLevel, "xhigh");
-  } finally {
-    cleanupSession(previousAgentDir);
-  }
-});
-
 // ─── Extension lifecycle surface tests ──────────────────────────────
 
 test("runtime --effort flag resolves aliases on session start", async () => {
@@ -290,26 +332,23 @@ test("runtime model switch clamps reasoning effort to off for non-reasoning mode
   }
 });
 
-test("argument completions are model-aware but keep explicit default levels", async () => {
-  const { extension, previousAgentDir } = await createTestSession(plainModel, "off", "off");
+test("argument completions expose only effort levels and fast on/off", async () => {
+  const { extension, previousAgentDir } = await createTestSession(reasoningModel, "medium", "medium");
 
   try {
     const command = extension.commands.get("effort");
     assert.ok(command?.getArgumentCompletions);
 
     const topLevel = await command.getArgumentCompletions("");
-    assert.deepEqual(topLevel?.map((item) => item.value), ["off", "show", "options", "default", "help"]);
+    assert.deepEqual(topLevel?.map((item) => item.value), ["min", "minimal", "low", "medium", "high", "max"]);
 
-    const defaultOptions = await command.getArgumentCompletions("default ");
-    assert.deepEqual(defaultOptions?.map((item) => item.value), [
-      "default off",
-      "default minimal",
-      "default low",
-      "default medium",
-      "default high",
-      "default xhigh",
-      "default clear",
-    ]);
+    assert.equal(await command.getArgumentCompletions("default "), null);
+    assert.equal(await command.getArgumentCompletions("fast "), null);
+
+    const fastCommand = extension.commands.get("fast");
+    assert.ok(fastCommand?.getArgumentCompletions);
+    const fastCommandOptions = await fastCommand.getArgumentCompletions("");
+    assert.deepEqual(fastCommandOptions?.map((item) => item.value), ["on", "off"]);
   } finally {
     cleanupSession(previousAgentDir);
   }
