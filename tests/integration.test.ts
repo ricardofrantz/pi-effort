@@ -147,11 +147,13 @@ function cleanupSession(previousAgentDir: string | undefined) {
 // ─── Basic command tests ────────────────────────────────────────────
 
 test("runtime command changes session thinking level", async () => {
-  const { session, previousAgentDir } = await createTestSession(reasoningModel, "medium", "medium");
+  const { session, agentDir, previousAgentDir } = await createTestSession(reasoningModel, "medium", "medium");
 
   try {
     await session.prompt("/effort high");
     assert.equal(session.thinkingLevel, "high" as ThinkingLevel);
+    const persisted = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8"));
+    assert.equal(persisted.defaultThinkingLevel, "high");
   } finally {
     cleanupSession(previousAgentDir);
   }
@@ -364,6 +366,88 @@ test("argument completions expose only effort levels and fast on/off", async () 
     assert.ok(fastCommand?.getArgumentCompletions);
     const fastCommandOptions = await fastCommand.getArgumentCompletions("");
     assert.deepEqual(fastCommandOptions?.map((item) => item.value), ["on", "off"]);
+  } finally {
+    cleanupSession(previousAgentDir);
+  }
+});
+
+test("bare /effort applies the level picked in the select dialog", async () => {
+  const { session, extension, previousAgentDir } = await createTestSession(reasoningModel, "medium", "medium");
+
+  try {
+    const command = extension.commands.get("effort");
+    assert.ok(command?.handler);
+
+    let offered: string[] | undefined;
+    await command.handler("", {
+      model: reasoningModel,
+      isIdle: () => true,
+      ui: {
+        select: async (_title: string, options: string[]) => {
+          offered = options;
+          return "low";
+        },
+        notify: () => {},
+        setStatus: () => {},
+        setWorkingMessage: () => {},
+      },
+    } as any);
+
+    assert.deepEqual(offered, ["min", "minimal", "low", "medium", "high", "max"]);
+    assert.equal(session.thinkingLevel, "low" as ThinkingLevel);
+  } finally {
+    cleanupSession(previousAgentDir);
+  }
+});
+
+test("bare /effort cancelled in the dialog leaves the level unchanged", async () => {
+  const { session, extension, previousAgentDir } = await createTestSession(reasoningModel, "medium", "medium");
+
+  try {
+    const command = extension.commands.get("effort");
+    assert.ok(command?.handler);
+
+    await command.handler("", {
+      model: reasoningModel,
+      isIdle: () => true,
+      ui: {
+        select: async () => undefined,
+        notify: () => {},
+        setStatus: () => {},
+        setWorkingMessage: () => {},
+      },
+    } as any);
+
+    assert.equal(session.thinkingLevel, "medium" as ThinkingLevel);
+  } finally {
+    cleanupSession(previousAgentDir);
+  }
+});
+
+test("bare /effort offers xhigh and resolves max for an xhigh-capable model", async () => {
+  const { session, extension, previousAgentDir } = await createTestSession(xhighModel, "medium", "medium");
+
+  try {
+    const command = extension.commands.get("effort");
+    assert.ok(command?.handler);
+
+    let offered: string[] | undefined;
+    await command.handler("", {
+      model: xhighModel,
+      isIdle: () => true,
+      ui: {
+        select: async (_title: string, options: string[]) => {
+          offered = options;
+          return "max";
+        },
+        notify: () => {},
+        setStatus: () => {},
+        setWorkingMessage: () => {},
+      },
+    } as any);
+
+    assert.deepEqual(offered, ["min", "minimal", "low", "medium", "high", "xhigh", "max"]);
+    assert.equal(session.thinkingLevel, "xhigh" as ThinkingLevel);
   } finally {
     cleanupSession(previousAgentDir);
   }

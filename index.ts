@@ -18,6 +18,7 @@ import {
   resolveMaxLevel,
   resolveMinLevel,
   toThinkingLevel,
+  writeDefaultThinkingLevel,
   writeFastMode,
 } from "./effort.js";
 
@@ -45,7 +46,8 @@ function applySessionLevel(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   level: EffortLevel,
-  fastMode: boolean
+  fastMode: boolean,
+  settingsPath: string
 ): void {
   const available = getAvailableThinkingLevels(ctx.model);
   if (!available.includes(level)) {
@@ -63,6 +65,13 @@ function applySessionLevel(
   updateEffortUi(ctx, after, fastMode, appliesNow);
   const suffix = appliesNow ? "" : " (applies next prompt)";
   ctx.ui.notify(before === after ? `Effort already ${after}` : `Effort changed: ${before} -> ${after}${suffix}`, "info");
+
+  // Pi's extension setThinkingLevel is session-scoped, so save the default ourselves.
+  try {
+    writeDefaultThinkingLevel(settingsPath, level);
+  } catch (error) {
+    ctx.ui.notify(`Failed to save default effort: ${error instanceof Error ? error.message : String(error)}`, "error");
+  }
 }
 
 export default function effortExtension(pi: ExtensionAPI): void {
@@ -233,9 +242,21 @@ export default function effortExtension(pi: ExtensionAPI): void {
       return null;
     },
     handler: async (args, ctx) => {
+      let input = args.trim();
+      if (input === "") {
+        const levels = getUserFacingLevels(ctx.model).filter((level) => level !== "max");
+        if (levels.length === 0) {
+          ctx.ui.notify(`Thinking not available for ${modelName(ctx.model)}`, "error");
+          return;
+        }
+        const picked = await ctx.ui.select(`Effort (current: ${pi.getThinkingLevel()})`, ["min", ...levels, "max"]);
+        if (!picked) return;
+        input = picked;
+      }
+
       let command;
       try {
-        command = parseEffortCommand(args);
+        command = parseEffortCommand(input);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         ctx.ui.notify(message, "error");
@@ -244,7 +265,7 @@ export default function effortExtension(pi: ExtensionAPI): void {
 
       switch (command.kind) {
         case "set-session":
-          applySessionLevel(pi, ctx, command.level, refreshFastMode());
+          applySessionLevel(pi, ctx, command.level, refreshFastMode(), settingsPath);
           return;
 
         case "set-min": {
@@ -253,7 +274,7 @@ export default function effortExtension(pi: ExtensionAPI): void {
             ctx.ui.notify(`Thinking not available for ${modelName(ctx.model)}`, "error");
             return;
           }
-          applySessionLevel(pi, ctx, resolved, refreshFastMode());
+          applySessionLevel(pi, ctx, resolved, refreshFastMode(), settingsPath);
           return;
         }
 
@@ -263,7 +284,7 @@ export default function effortExtension(pi: ExtensionAPI): void {
             ctx.ui.notify(`Thinking not available for ${modelName(ctx.model)}`, "error");
             return;
           }
-          applySessionLevel(pi, ctx, resolved, refreshFastMode());
+          applySessionLevel(pi, ctx, resolved, refreshFastMode(), settingsPath);
           return;
         }
       }

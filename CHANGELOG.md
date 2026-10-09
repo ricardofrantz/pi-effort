@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Bare `/effort` opened a select dialog with the current model's levels instead of failing with the usage error.
+
 ## [0.0.8] - 2026-08-15
 
 ### Added
